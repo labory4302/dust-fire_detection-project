@@ -1,0 +1,81 @@
+#include <TinyGPS.h>
+#include <SPI.h>
+#include <RH_RF95.h>
+#include <core_build_options.h>
+#include <pm2008_i2c.h>
+#include <swRTC.h>
+
+static void smartdelay(unsigned long ms);
+
+PM2008_I2C pm2008_i2c;
+TinyGPS gps;
+swRTC rtc;
+RH_RF95 rf95;
+
+uint8_t dataoutgoing[100];
+char gps_lon[20]={"\0"};  
+char gps_lat[20]={"\0"};
+char send_data[100]={"\0"}; 
+char temptime[20]={"\0"};
+char tempdust[20]={"\0"};
+
+void setup()
+{
+  Serial.begin(9600);
+  rtc.stopRTC();
+  rtc.setTime(12,00,00);
+  rtc.startRTC();
+  pm2008_i2c.begin();
+  pm2008_i2c.command();
+
+  if (!rf95.init())
+    Serial.println("init failed");
+  else
+    Serial.println("init success");
+}
+
+void loop()
+{
+  float flat, flon;
+  uint8_t ret = pm2008_i2c.read();
+
+  gps.f_get_position(&flat, &flon);
+
+  dtostrf(flat, 10, 6, gps_lat); 
+  dtostrf(flon, 11, 6, gps_lon);
+
+  int sendFdust = pm2008_i2c.pm2p5_tsi;
+  int sendUFdust = pm2008_i2c.pm10_tsi;
+  
+  sprintf(tempdust, "%d,%d", sendFdust, sendUFdust);
+  
+  strcpy(send_data, "A1");
+  strcat(send_data, ",");
+  strcat(send_data, gps_lat);
+  strcat(send_data,",");
+  strcat(send_data, gps_lon);
+  strcat(send_data,",");
+  strcat(send_data,tempdust);
+  strcpy((char *)dataoutgoing,send_data);
+
+  if((rtc.getSeconds() == 20) || (rtc.getSeconds() == 50))
+  {
+    rf95.send(dataoutgoing, sizeof(dataoutgoing));
+    rf95.waitPacketSent();
+  }
+  
+  smartdelay(1000);
+}
+
+static void smartdelay(unsigned long ms)
+{
+  unsigned long start = millis();
+  
+  do 
+  {
+    while (Serial.available())
+    {
+      gps.encode(Serial.read());
+    }
+  } while (millis() - start < ms);
+}
